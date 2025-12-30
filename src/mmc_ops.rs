@@ -2,7 +2,7 @@ use std::{fs::File, io, os::fd::AsRawFd};
 
 use crate::constants::*;
 
-#[repr(C)]
+#[repr(C)] // just do as C does while allocating the struct
 #[derive(Debug, Copy, Clone)]
 pub struct MmcIocCmd {
     write_flag: u32,
@@ -20,29 +20,33 @@ pub struct MmcIocCmd {
     data_ptr: u64,
 }
 
+pub fn exec_ioctl(fd: &File, cmd: &mut MmcIocCmd) -> io::Result<()> {
+    let rc = unsafe { libc::ioctl(fd.as_raw_fd(), MMC_IOC_CMD.try_into().unwrap(), cmd) };
+    if rc != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
 pub fn read_extcsd(fd: &File, buf: &mut [u8; 512]) -> io::Result<()> {
     buf.fill(0);
 
-    let mut idata = MmcIocCmd {
+    let mut cmd = MmcIocCmd {
         write_flag: 0,
         opcode: MMC_SEND_EXT_CSD,
         arg: 0,
         flags: MMC_RSP_SPI_R1 | MMC_RSP_R1 | MMC_CMD_ADTC,
-        blksz: 512,
+        blksz: BLK_SZ,
         blocks: 1,
         postsleep_min_us: 0,
         postsleep_max_us: 0,
-        data_timeout_ns: 0,
-        cmd_timeout_ms: 0,
+        data_timeout_ns: 0, // driver default
+        cmd_timeout_ms: 0,  // driver default
         __pad: 0,
         response: [0; 4],
-        data_ptr: buf.as_mut_ptr() as u64, // mmc_ioc_cmd_set_data(...)
+        data_ptr: buf.as_mut_ptr() as u64,
     };
 
-    let rc = unsafe { libc::ioctl(fd.as_raw_fd(), MMC_IOC_CMD as u64, &mut idata) };
-    if rc != 0 {
-        return Err(io::Error::last_os_error());
-    }
-
+    exec_ioctl(fd, &mut cmd)?;
     Ok(())
 }

@@ -1,5 +1,6 @@
 // eMMC commands
 pub const MMC_SEND_EXT_CSD: u32 = 8;
+pub const MMC_IOC_CMD: libc::c_ulong = 0; // arch dependent
 
 // Response types
 pub const MMC_RSP_NONE: u32 = 0;
@@ -23,7 +24,8 @@ pub const MMC_RSP_SPI_R1B: u32 = MMC_RSP_SPI_S1 | MMC_RSP_SPI_BUSY;
 
 // Native (non-SPI) responses
 pub const MMC_RSP_R1: u32 = MMC_RSP_PRESENT | MMC_RSP_CRC | MMC_RSP_OPCODE;
-
 pub const MMC_RSP_R1B: u32 = MMC_RSP_PRESENT | MMC_RSP_CRC | MMC_RSP_OPCODE | MMC_RSP_BUSY;
 
-pub const MMC_IOC_CMD: u32 = 0; // arch dependent
+// Extra Constants
+pub const BLK_SZ: u32 = 512;
+pub const DEFAULT_DEV_PATH: &str = "/dev/block/mmcblk0";
