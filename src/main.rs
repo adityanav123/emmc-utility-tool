@@ -1,69 +1,91 @@
 use clap::{Parser, Subcommand};
-use constants::DEFAULT_DEV_PATH;
-use mmc_ops::read_extcsd;
+use constants::set_debug_level;
 use rhexdump::prelude::*;
-use std::fs::File;
 use std::io;
 
+use nix::fcntl::{OFlag, open};
+use nix::sys::stat::Mode;
+use std::os::fd::{AsRawFd, OwnedFd};
+
+use crate::constants::{AlignedBuffer512B, DEFAULT_DEV_PATH, DEV_STATUS_ARG_CMD13};
+use crate::mmc_cmds::{check_device_status, fetch_extcsd};
+
 mod constants;
+mod mmc_cmds;
 mod mmc_ops;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about=None)]
 struct Cli {
-    ///Custom Device Path
-    #[arg(short, long)]
-    pdev: Option<String>,
+    ///  Device Path  (--dev, -p)
+    #[arg(short = 'p', long)]
+    dev: Option<String>,
 
     /// emmc commands
     #[command(subcommand)]
-    operation: Command,
+    operation: MMCOperations,
 
-    /// Turn on Debugging Info (-d, -dd, -ddd....)
-    #[arg(short, long,  action=clap::ArgAction::Count)]
+    /// Turn on Debugging Info (--debug, -d)
+    #[arg(short='d', long, action=clap::ArgAction::Count)]
     debug: u8,
 }
 
 #[derive(Subcommand, Clone, Debug)]
-enum Command {
-    /// Read Extended CSD Register (512B) and print hex-dump
+enum MMCOperations {
+    /// Read Extended CSD Register
     ExtCsd,
-    /// Read CID Register and print hex-dump
+    /// Check Device Status
+    DeviceStatus,
+    /// Read CID Register
     CID,
-    /// Perform Firmware Field Upgrade
+    /// Firmware Field Upgrade
     FFU,
-    /// Perform Logical Blk Address -to- Physical Blk Address Conversion
+    /// Logical Blk Address -to- Physical Blk Address Conversion
     L2P,
-    /// Fetch Smart Report
-    SR,
-    /// Fetch Secure Smart Report
-    SSR,
 }
 
+/// Open e.MMC Device Handle
+pub fn open_mmc_rw(path: &str) -> io::Result<OwnedFd> {
+    open(path, OFlag::O_RDWR | OFlag::O_CLOEXEC, Mode::empty())
+        .map_err(|e| io::Error::from_raw_os_error(e as i32))
+}
+
+/// MAIN flow
 fn main() -> io::Result<()> {
     let cli = Cli::parse();
-
-    let dev = cli.pdev.as_deref().unwrap_or(DEFAULT_DEV_PATH);
-
+    let dev = cli.dev.as_deref().unwrap_or(DEFAULT_DEV_PATH);
+    // debug flow
     if cli.debug > 0 {
         eprintln!(
             "[debug] dev={}, op={:?}, debug_level={}",
             dev, cli.operation, cli.debug
         );
+        set_debug_level(cli.debug);
     }
 
     match cli.operation {
-        Command::ExtCsd => {
-            let fd = File::open(dev)?;
-            let mut buf = [0u8; 512];
-            read_extcsd(&fd, &mut buf)?;
+        MMCOperations::ExtCsd => {
+            let fd = open_mmc_rw(dev)?;
+            println!("[mmc][op] : fetching ext-csd register!");
+            let buff: AlignedBuffer512B = fetch_extcsd(fd.as_raw_fd())?;
 
             println!("EXT_CSD ({dev}):");
-            rhexdump!(&buf);
+            rhexdump!(&buff.0); // print hexdump
         }
-        _ => {
-            println!("Under Development!")
+        MMCOperations::DeviceStatus => {
+            let fd = open_mmc_rw(dev)?;
+            println!("[mmc][op] : checking device status!");
+            match check_device_status(fd.as_raw_fd(), DEV_STATUS_ARG_CMD13) {
+                Ok(_) => println!("[mmc][chk-status] device in ready state!"),
+                Err(e) => {
+                    eprintln!("[mmc][chk-status] device not in ready state!");
+                    if cli.debug > 0 {
+                        eprintln!("[debug] check-status error: {e}");
+                    }
+                }
+            }
         }
+        _ => println!("Under Development!"),
     }
 
     Ok(())
